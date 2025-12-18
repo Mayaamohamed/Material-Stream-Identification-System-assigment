@@ -12,6 +12,16 @@ import tensorflow as tf
 from keras.applications import MobileNetV2
 from keras.applications.mobilenet_v2 import preprocess_input
 
+CLASS_TO_ID = {
+    'glass': 0,
+    'paper': 1,
+    'cardboard': 2,
+    'plastic': 3,
+    'metal': 4,
+    'trash': 5,
+    'Unknown': 6
+}
+
 
 def _load_and_process_image(img_path, img_name, img_size, min_size):
     """Load and preprocess a single image."""
@@ -43,16 +53,23 @@ def _get_image_files(data_file_path):
     return image_files
 
 
-def _make_predictions(model, x_features_scaled, confidence_threshold):
-    """Generate predictions from features."""
+def _make_predictions(model, x_features_scaled, confidence_threshold, class_to_id):
+    predictions = []
     if hasattr(model, 'predict_proba'):
         probabilities = model.predict_proba(x_features_scaled)
         max_probs = np.max(probabilities, axis=1)
         pred_classes = model.classes_[np.argmax(probabilities, axis=1)]
-        return ["Unknown" if prob < confidence_threshold else cls 
-                for cls, prob in zip(pred_classes, max_probs)]
+        
+        for cls, prob in zip(pred_classes, max_probs):
+            if prob < confidence_threshold:
+                predictions.append(6) 
+            else:
+                predictions.append(class_to_id.get(cls, 6))
     else:
-        return list(model.predict(x_features_scaled))
+        pred_classes = model.predict(x_features_scaled)
+        predictions = [class_to_id.get(cls, 6) for cls in pred_classes]
+    
+    return predictions
 
 
 def predict(data_file_path, best_model_path):
@@ -125,7 +142,7 @@ def predict(data_file_path, best_model_path):
     x_features_scaled = scaler.transform(x_features)
     
     print("Making predictions...")
-    predictions = _make_predictions(model, x_features_scaled, CONFIDENCE_THRESHOLD)
+    predictions = _make_predictions(model, x_features_scaled, CONFIDENCE_THRESHOLD, CLASS_TO_ID)
     
     print(f"Generated {len(predictions)} predictions")
     print(f"Prediction distribution: {dict(zip(*np.unique(predictions, return_counts=True)))}")
@@ -136,8 +153,8 @@ def predict(data_file_path, best_model_path):
 
 if __name__ == "__main__":
    
-    test_data_path = "C:/Users/roqai/Downloads/dataset/glass"  
-    model_path = "C:/Users/roqai/Downloads/trained_svm_model.pkl"     
+    test_data_path = ""  #add hidden test data path here
+    model_path = "trained_svm_model.pkl"     
     
     try:
         predictions = predict(test_data_path, model_path)
