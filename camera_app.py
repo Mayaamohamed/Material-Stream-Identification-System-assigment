@@ -6,12 +6,12 @@ from keras.applications import MobileNetV2
 from keras.applications.mobilenet_v2 import preprocess_input
 import time
 
-# Configuration
-MODEL_PATH = "C:/Users/roqai/Downloads/trained_svm_model.pkl"  # Change to your model path
-SCALER_PATH = "C:/Users/roqai/Downloads/trained_scaler.pkl"
+
+MODEL_PATH = "C:/Users/roqai/Downloads/trained_svm_model.pkl" #change to your own path
+SCALER_PATH = "C:/Users/roqai/Downloads/trained_scaler.pkl"   #change to your own path
 CONFIDENCE_THRESHOLD = 0.6
 
-# Material class names and colors for display
+
 CLASS_NAMES = {
     0: "Glass",
     1: "Paper", 
@@ -36,11 +36,11 @@ class MaterialClassifier:
     def __init__(self, model_path, scaler_path):
         print("Loading models...")
         
-        # Load the trained classifier
+      
         self.classifier = joblib.load(model_path)
         self.scaler = joblib.load(scaler_path)
         
-        # Load MobileNetV2 for feature extraction
+      
         base_model = MobileNetV2(weights="imagenet", include_top=False, 
                                 input_shape=(128, 128, 3))
         self.feature_extractor = tf.keras.Sequential([
@@ -52,27 +52,27 @@ class MaterialClassifier:
     
     def preprocess_frame(self, frame):
         """Preprocess camera frame for classification"""
-        # Resize to 128x128
+      
         img = cv2.resize(frame, (128, 128))
         
-        # Convert BGR to RGB
+      
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        # Normalize to [0, 1]
+     
         img = img.astype(np.float32) / 255.0
         
         return img
     
     def extract_features(self, img):
         """Extract features using MobileNetV2"""
-        # Preprocess for MobileNetV2
+    
         img_preprocessed = preprocess_input(img * 255.0)
         img_batch = np.expand_dims(img_preprocessed, axis=0)
         
-        # Extract features
+      
         features = self.feature_extractor.predict(img_batch, verbose=0)
         
-        # Scale features
+  
         features_scaled = self.scaler.transform(features)
         
         return features_scaled
@@ -90,28 +90,28 @@ class MaterialClassifier:
 
 def draw_prediction_box(frame, class_name, confidence):
     """Draw prediction information on frame"""
-    h, w = frame.shape[:2]
+    _, w = frame.shape[:2]
     
-    # Create semi-transparent overlay
+   
     overlay = frame.copy()
     
-    # Draw background rectangle
+   
     cv2.rectangle(overlay, (10, 10), (w - 10, 120), (0, 0, 0), -1)
     frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
     
-    # Get color for class
+   
     color = CLASS_COLORS.get(class_name, (255, 255, 255))
     
-    # Draw class name
+    
     cv2.putText(frame, f"Material: {class_name}", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
     
-    # Draw confidence
+  
     conf_text = f"Confidence: {confidence:.2%}"
     cv2.putText(frame, conf_text, (20, 90),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     
-    # Draw confidence bar
+   
     bar_width = int((w - 40) * confidence)
     cv2.rectangle(frame, (20, 100), (20 + bar_width, 110), color, -1)
     cv2.rectangle(frame, (20, 100), (w - 20, 110), (255, 255, 255), 2)
@@ -119,7 +119,7 @@ def draw_prediction_box(frame, class_name, confidence):
     return frame
 
 def main():
-    # Initialize classifier
+  
     try:
         classifier = MaterialClassifier(MODEL_PATH, SCALER_PATH)
     except Exception as e:
@@ -127,14 +127,14 @@ def main():
         print("Please update MODEL_PATH and SCALER_PATH to point to your model files.")
         return
     
-    # Open camera
+    
     cap = cv2.VideoCapture(0)
     
     if not cap.isOpened():
         print("Error: Could not open camera")
         return
     
-    # Set camera properties for better performance
+   
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
@@ -144,12 +144,11 @@ def main():
     print(f"Confidence threshold: {CONFIDENCE_THRESHOLD}")
     print("\nPoint camera at recyclable materials...")
     
-    # Variables for FPS calculation
+   
     fps = 0
     frame_count = 0
     start_time = time.time()
     
-    # Main loop
     while True:
         ret, frame = cap.read()
         
@@ -157,28 +156,28 @@ def main():
             print("Error: Failed to capture frame")
             break
         
-        # Process every frame
+       
         try:
-            # Preprocess frame
+          
             processed_img = classifier.preprocess_frame(frame)
             
-            # Extract features
+            
             features = classifier.extract_features(processed_img)
             
-            # Predict
+           
             class_name, confidence = classifier.predict_with_rejection(features)
             
-            # Draw prediction on frame
+          
             frame = draw_prediction_box(frame, class_name, confidence)
             
-            # Calculate FPS
+
             frame_count += 1
             if frame_count % 10 == 0:
                 end_time = time.time()
                 fps = 10 / (end_time - start_time)
                 start_time = time.time()
             
-            # Draw FPS
+           
             cv2.putText(frame, f"FPS: {fps:.1f}", (frame.shape[1] - 150, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
@@ -186,15 +185,14 @@ def main():
             print(f"Error processing frame: {e}")
             cv2.putText(frame, "Processing Error", (20, 50),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        
-        # Display frame
+      
         cv2.imshow('Material Stream Identification System', frame)
         
-        # Check for quit
+        
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
     
-    # Cleanup
+    
     cap.release()
     cv2.destroyAllWindows()
     print("\nApplication closed.")
