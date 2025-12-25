@@ -9,8 +9,11 @@ import numpy as np
 from PIL import Image, ImageOps
 import joblib
 import tensorflow as tf
+import pandas as pd
 from keras.applications import MobileNetV2
 from keras.applications.mobilenet_v2 import preprocess_input
+
+# ===================== CONSTANTS =====================
 
 CLASS_TO_ID = {
     'glass': 0,
@@ -22,146 +25,149 @@ CLASS_TO_ID = {
     'Unknown': 6
 }
 
+ID_TO_CLASS = {v: k for k, v in CLASS_TO_ID.items()}
 
-def _load_and_process_image(img_path, img_name, img_size, min_size):
+IMG_SIZE = (128, 128)
+MIN_SIZE = 32
+CONFIDENCE_THRESHOLD = 0.6
+
+
+# ===================== IMAGE PROCESSING =====================
+
+def _load_and_process_image(img_path, img_name):
     """Load and preprocess a single image."""
     if os.path.getsize(img_path) == 0:
         print(f"Skipping empty file: {img_name}")
         return None
-    
+
     pil_img = Image.open(img_path)
     pil_img = ImageOps.exif_transpose(pil_img)
     pil_img = pil_img.convert("RGB")
     img = np.array(pil_img)
-    
-    if img.shape[0] < min_size or img.shape[1] < min_size:
+
+    if img.shape[0] < MIN_SIZE or img.shape[1] < MIN_SIZE:
         print(f"Skipping small image: {img_name}")
         return None
-    
-    img = cv2.resize(img, img_size)
-    img = img.astype(np.float32) / 255.0
+
+    img = cv2.resize(img, IMG_SIZE)
+    img = img.astype(np.float32)
     return img
 
 
-def _get_image_files(data_file_path):
-    """Get list of valid image files from directory."""
+def _get_image_files(folder_path):
+    """List all valid image files in a directory."""
     valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
-    image_files = []
-    for filename in sorted(os.listdir(data_file_path)):
-        if filename.lower().endswith(valid_extensions):
-            image_files.append(filename)
-    return image_files
+    return sorted([
+        f for f in os.listdir(folder_path)
+        if f.lower().endswith(valid_extensions)
+    ])
 
 
-def _make_predictions(model, x_features_scaled, confidence_threshold, class_to_id):
+# ===================== PREDICTION =====================
+
+def _make_predictions(model, features_scaled):
+    """Generate predictions with confidence threshold."""
     predictions = []
-    if hasattr(model, 'predict_proba'):
-        probabilities = model.predict_proba(x_features_scaled)
-        max_probs = np.max(probabilities, axis=1)
-        pred_classes = model.classes_[np.argmax(probabilities, axis=1)]
-        
+
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(features_scaled)
+        max_probs = np.max(probs, axis=1)
+        pred_classes = model.classes_[np.argmax(probs, axis=1)]
+
         for cls, prob in zip(pred_classes, max_probs):
-            if prob < confidence_threshold:
-                predictions.append(6) 
+            if prob < CONFIDENCE_THRESHOLD:
+                predictions.append(6)  # Unknown
             else:
-                predictions.append(class_to_id.get(cls, 6))
+                predictions.append(CLASS_TO_ID.get(cls, 6))
     else:
-        pred_classes = model.predict(x_features_scaled)
-        predictions = [class_to_id.get(cls, 6) for cls in pred_classes]
-    
+        pred_classes = model.predict(features_scaled)
+        predictions = [CLASS_TO_ID.get(cls, 6) for cls in pred_classes]
+
     return predictions
 
 
-def predict(data_file_path, best_model_path):
+# ===================== MAIN FUNCTION =====================
+
+def predict(data_folder_path, model_path, output_excel_path="predictions.xlsx"):
     """
-    Predict material classes for images in the given folder.
-    
-    Parameters:
-    -----------
-    data_file_path : str
-        Path to folder containing test images
-    best_model_path : str
-        Path to the trained model file (.pkl)
-    
-    Returns:
-    --------
-    predictions : list
-        List of predicted class labels for each image
+    Predict material classes for all images in a folder
+    and save results to an Excel file.
     """
-    
-   
-    IMG_SIZE = (128, 128)
-    MIN_SIZE = 32
-    CONFIDENCE_THRESHOLD = 0.6
-    
-    
-    print(f"Loading model from: {best_model_path}")
-    model = joblib.load(best_model_path)
-    scaler_path = os.path.join(os.path.dirname(best_model_path), "trained_scaler.pkl")
+
+    print(f"Loading model: {model_path}")
+    model = joblib.load(model_path)
+
+    scaler_path = os.path.join(os.path.dirname(model_path), "trained_scaler.pkl")
     scaler = joblib.load(scaler_path)
-    
-  
+
     print("Initializing feature extractor...")
-    base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=(128, 128, 3))
+    base_model = MobileNetV2(
+        weights="imagenet",
+        include_top=False,
+        input_shape=(128, 128, 3)
+    )
     feature_extractor = tf.keras.Sequential([
         base_model,
         tf.keras.layers.GlobalAveragePooling2D()
     ])
-    
-   
-    print(f"Loading images from: {data_file_path}")
-    image_files = _get_image_files(data_file_path)
-    print(f"Found {len(image_files)} images")
-    
 
-    X_test = []
+    image_files = _get_image_files(data_folder_path)
+    print(f"Found {len(image_files)} images")
+
+    images = []
+    valid_image_names = []
+
     for img_name in image_files:
-        img_path = os.path.join(data_file_path, img_name)
+        img_path = os.path.join(data_folder_path, img_name)
         try:
-            img = _load_and_process_image(img_path, img_name, IMG_SIZE, MIN_SIZE)
+            img = _load_and_process_image(img_path, img_name)
             if img is not None:
-                X_test.append(img)
+                images.append(img)
+                valid_image_names.append(img_name)
         except Exception as e:
             print(f"Error loading {img_name}: {e}")
-    
-    print(f"Successfully loaded {len(X_test)} images")
-    
-    if len(X_test) == 0:
-        print("No valid images found!")
-        return []
-    
- 
-    X_test = np.array(X_test)
-    
+
+    if len(images) == 0:
+        raise RuntimeError("No valid images found!")
+
+    images = np.array(images)
 
     print("Extracting features...")
-    x_test_preprocessed = preprocess_input(X_test * 255.0)
-    x_features = feature_extractor.predict(x_test_preprocessed, batch_size=32, verbose=1)
-  
+    images = preprocess_input(images)
+    features = feature_extractor.predict(images, batch_size=32, verbose=1)
+
     print("Scaling features...")
-    x_features_scaled = scaler.transform(x_features)
-    
+    features_scaled = scaler.transform(features)
+
     print("Making predictions...")
-    predictions = _make_predictions(model, x_features_scaled, CONFIDENCE_THRESHOLD, CLASS_TO_ID)
-    
-    print(f"Generated {len(predictions)} predictions")
-    print(f"Prediction distribution: {dict(zip(*np.unique(predictions, return_counts=True)))}")
-    
-    return predictions
+    predicted_ids = _make_predictions(model, features_scaled)
+    predicted_labels = [ID_TO_CLASS[p] for p in predicted_ids]
+
+    # ===================== SAVE TO EXCEL =====================
+
+    df = pd.DataFrame({
+        "Image_Name": valid_image_names,
+        "Predicted_Label": predicted_labels
+    })
+
+    df.to_excel(output_excel_path, index=False)
+    print(f"Predictions saved to: {output_excel_path}")
+
+    return df
 
 
+# ===================== ENTRY POINT =====================
 
 if __name__ == "__main__":
-   
-    test_data_path = ""  #add hidden test data path here
-    model_path = "trained_svm_model.pkl"     
-    
+
+    test_data_path = "path_to_hidden_test_folder"
+    model_path = "trained_svm_model.pkl"
+
     try:
-        predictions = predict(test_data_path, model_path)
-        print("\nPredictions:")
-        for i, pred in enumerate(predictions):
-            print(f"Image {i+1}: {pred}")
+        predict(
+            data_folder_path=test_data_path,
+            model_path=model_path,
+            output_excel_path="submission_predictions.xlsx"
+        )
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        print("Error occurred:", e)
